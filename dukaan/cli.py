@@ -18,6 +18,17 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
 
 
+def _masked(url: str) -> str:
+    """Show enough of the instance URL to identify it, not enough to use it.
+
+    The tunnel in front of the instance takes no credentials, so the URL is the
+    credential: anyone who reads one off a screenshot or a CI log can spend the
+    GPU budget behind it. The host is useful to see, the instance id is not.
+    """
+    head, _, tail = url.rstrip("/").rpartition("/")
+    return f"{head}/{tail[:6]}..." if len(tail) > 6 else url
+
+
 @app.command()
 def styles() -> None:
     """Looks a seller can pick without writing a prompt."""
@@ -46,7 +57,7 @@ def doctor() -> None:
         console.print("  [dim]export DUKAAN_INSTANCE=https://<host>/instances/<instance-id>[/dim]")
         raise typer.Exit(0)
 
-    console.print(f"instance: {cfg.instance}")
+    console.print(f"instance: {_masked(cfg.instance)}")
     backend = RadeonBackend(cfg)
     try:
         # rocm-smi cannot reach libdrm inside this container and torch returns

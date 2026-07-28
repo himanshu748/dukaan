@@ -5,3 +5,4 @@ out/
 .env
 .pytest_cache/
 dist-pdf/*.html
+demo-terminal.mp4

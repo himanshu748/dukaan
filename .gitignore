@@ -8,3 +8,4 @@ out-*/
 dist-pdf/*.html
 demo-terminal.mp4
 out-ui/
+out-refine/

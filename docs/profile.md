@@ -48,6 +48,7 @@ commission artwork for it.
 | Story or reel slot | 1024x1820 still plus a 2-second clip with generated ambient audio |
 | Marketplace or shop-page header | 1820x1024 banner |
 | Price change | `dukaan relabel` recomposes the same stills with new type, no GPU |
+| Wrong moment in the shot | The browser UI's scrubber rebuilds from any of the 49 frames, no GPU |
 
 **Why the constraints matter.** Sellers photograph against whatever is behind
 the counter, so the background is rarely one flat colour. They type prices and
@@ -92,6 +93,27 @@ purpose. The cutout is a least-squares fit; the still selection is a Laplacian
 variance; the reshaping is an index map; the type is a font. Spending GPU
 credits on any of them would be waste. The GPU does the one thing with no CPU
 equivalent, and it does it **once per pack** rather than once per output.
+
+### 3.1 Two surfaces, one pipeline
+
+`dukaan serve` puts the same pipeline behind a browser form: photo, headline,
+price, look, button. It calls `build_pack`, the path the CLI uses, so the two
+surfaces cannot disagree about what the tool does. The rules list a web UI and a
+CLI plus demo workflow as valid delivery forms; this ships both.
+
+The scrubber is the part that only this architecture allows. Because the only
+generative model on the instance is a video model, a pack is not three renders,
+it is one generated scene with three moments lifted out of it. The other 46
+frames are already on disk and already paid for, so choosing a different one
+rebuilds the creative on the CPU in milliseconds and reports **0 seconds of
+GPU**. A tool built on an image model cannot offer that, because each candidate
+would be another generation.
+
+Measured through the UI against the live Radeon: 94.4 s for 49 frames at
+768x768, then rebuilding the square from moment 30 instead of moment 1 at no
+GPU cost. It is also the honest answer to a real failure mode: the model
+occasionally leaves an artefact in a frame, and the seller can simply pick
+another moment instead of paying for a re-roll.
 
 ## 4. Models and algorithms
 

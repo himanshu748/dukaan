@@ -7,3 +7,4 @@ out-*/
 .pytest_cache/
 dist-pdf/*.html
 demo-terminal.mp4
+out-ui/

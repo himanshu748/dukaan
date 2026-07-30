@@ -176,6 +176,34 @@ A plane was tried first. It cleared the top-to-bottom wash and left an
 elliptical pool of backdrop exactly where the product sits, because catalogue
 lighting pools rather than ramps. The quadratic basis is what fixed it.
 
+**Per-pixel thresholding is not enough on its own**, and the two ways it fails
+were both visible in an earlier version of the gallery. A light product on a lit
+sweep reads partly as backdrop, so the middle of it comes back full of holes: on
+the silver bracelet that was 14,497 pixels of the band. And a lobe of backdrop
+the fit cannot account for survives as a patch stuck to the product. Both are
+obvious once whole regions are considered instead of pixels, which is what
+`dukaan/regions.py` does: drop blobs far smaller than the product, then close
+background pockets that cannot reach the frame edge.
+
+The size limit on that second step matters more than it looks. A first version
+closed every enclosed pocket and nearly doubled the gilt bangles' mask, from
+14.7% of the frame to 28.2%, because **a bangle's interior is real backdrop and
+filling it turns two rings into two discs**. A teapot handle has the same
+property. Only pockets smaller than 2% of the product's own area are closed now.
+
+**A known limitation.** One of the sample photographs, the blue-and-white
+porcelain vase, has a vignette *behind* the object. No fit to the border ring
+can see it, and the lobe it leaves is genuinely fused to the vase, so no region
+filter can separate the two. A morphological opening was measured as a way out
+and rejected: at radius 6 the lobe still held 33,110 pixels and at radius 12
+still 15,403, while by radius 10 the brass ewer had lost 1.9% of frame, which
+is its spout and handle. Refitting the surface iteratively on non-product pixels
+was also measured, and made the lobe marginally worse while shrinking the silver
+bracelet's mask by 1.9%. Paying real product detail for a defect that survives
+anyway is a bad trade, so the opening ships disabled with its measurements next
+to it, and that photograph is not shown as if it were good output. The honest
+fix is a matting model, which section 8 lists as the next step.
+
 ### 4.3 Still selection
 
 Frames are split into as many contiguous windows as there are formats, and the

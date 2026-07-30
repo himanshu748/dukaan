@@ -13,6 +13,51 @@ and the type is composited afterwards.
 
 ---
 
+## Every product, every style
+
+Twelve packs: each product run under each look. One photograph in four styles
+shows the styles work; this shows they work across the catalogue rather than on
+one lucky input.
+
+![style matrix](gallery/style-matrix.png)
+
+Look at the bangles on the festive ground: the marigolds show *through* the ring
+interiors. That is the cutout correctly treating an enclosed pocket of backdrop
+as backdrop, which an earlier version got wrong by filling it and turning two
+rings into two discs.
+
+The blue-and-white porcelain vase is deliberately absent. Its photograph carries
+a vignette behind the object that the backdrop fit cannot see, and the patch it
+leaves is fused to the vase, so it comes out with a streak beside it. Several
+ways of removing it were measured and none paid for itself; the numbers are in
+[profile.md](profile.md), section 4.2. Showing it here as though it were good
+output would be the dishonest choice.
+
+---
+
+## The product survives the generation
+
+`strength=0.7` on the image-to-video conditioning means the model is genuinely
+allowed to alter the product, so this is a claim to be checked rather than
+asserted. Each row is one pack: the plate the model was handed, then the frames
+the pack actually selected.
+
+![product survives](gallery/product-survives.png)
+
+The corrosion marks on the bangles, the engraving and pitting on the ewer, and
+the dragon heads on the bracelet all carry through unchanged while the scene
+around them is rebuilt completely. The brass ewer row is the clearest: a flat
+maroon wash becomes full festive bokeh, and the object does not move.
+
+This is shown rather than scored on purpose. A pixel metric against the plate
+measures the camera, not the product: the motion prompt pushes the camera in, so
+by the later frames the object is legitimately larger and in a different place,
+and a mask taken from the plate lands on the wrong pixels. Aligning that away
+was attempted several times and kept disagreeing with what the crops plainly
+show, so the crops are the evidence.
+
+---
+
 ## One photo, four looks
 
 The same photograph under every style Dukaan ships. Only the style name changed

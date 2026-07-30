@@ -26,6 +26,15 @@ interiors. That is the cutout correctly treating an enclosed pocket of backdrop
 as backdrop, which an earlier version got wrong by filling it and turning two
 rings into two discs.
 
+**The styles do not all relight to the same degree, and the grid shows it.**
+Studio, festive and midnight keep the flat catalogue view they were given.
+Daylight, whose plate backdrop sits furthest from a plain sweep, sometimes
+re-stages instead: the silver bracelet comes back standing on the wooden surface
+with real depth rather than lying flat. Its identity is intact, the dragon heads,
+the engraving, the open gap and the border pattern all match the photograph, but
+the model has inferred volume that the flat input did not contain. That is worth
+knowing before choosing a style for a product whose exact shape matters.
+
 The blue-and-white porcelain vase is deliberately absent. Its photograph carries
 a vignette behind the object that the backdrop fit cannot see, and the patch it
 leaves is fused to the vase, so it comes out with a streak beside it. Several
@@ -101,29 +110,12 @@ redesigned the product.
 
 ---
 
-## Blue-and-white porcelain vase, midnight
-
-<img src="gallery/porcelain-vase-plate.png" width="260">
-
-| square, frame 1 | story, frame 29 | banner, frame 33 |
-|---|---|---|
-| <img src="gallery/porcelain-vase-square.png" width="240"> | <img src="gallery/porcelain-vase-story.png" width="135"> | <img src="gallery/porcelain-vase-banner.png" width="300"> |
-
-![clip](gallery/porcelain-vase-clip.gif)
-
-62.0 s of GPU time. The square landed on frame 1 here: the model settles almost
-immediately on a dark ground, so the sharpest frame in the first window is an
-early one.
-
----
-
 ## What the numbers were
 
 | product | style | GPU | wall clock | frames | stills from |
 |---|---|---|---|---|---|
 | brass ewer | festive | 65.3 s | 2 m 20 s | 49 | 16, 20, 48 |
 | silver bangle | studio | 72.6 s | 2 m 19 s | 49 | 13, 21, 48 |
-| gilt bangles | midnight | 62.0 s | n/a (batched) | 49 | 1, 29, 33 |
 
 Wall clock includes the plate upload, both model loads and pulling 49 frames
 plus a wav back over the tunnel. Before frames were fetched as one tar it was

@@ -51,7 +51,7 @@ def build(out_path: str) -> Path:
     d = ImageDraw.Draw(sheet)
 
     d.text((22, 20), "Every product, every style", font=_font(28, bold=True), fill=FG)
-    d.text((22, 54), "one GPU pass per pack, the product carried through untouched",
+    d.text((22, 54), "one GPU pass per pack, always the seller's own product",
            font=_font(16), fill=DIM)
 
     for c, style in enumerate(STYLES):

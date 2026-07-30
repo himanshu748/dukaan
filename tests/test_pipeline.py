@@ -298,6 +298,15 @@ class TestRegions:
         m[30, 30] = False                                  # one stray pixel
         assert fill_holes(m)[30, 30]
 
+    def test_clean_keeps_small_detached_detail(self):
+        """Fine engraving fragments the mask; pruning to the largest ate it."""
+        import numpy as np
+        from dukaan.regions import clean
+        m = np.zeros((60, 60), bool)
+        m[10:50, 10:40] = True    # the body
+        m[52, 20:30] = True       # a thin detached sliver of real detail
+        assert clean(m)[52, 25], "detail survived"
+
     def test_clean_severs_a_thin_necked_lobe(self):
         """The vignette streak case: real backdrop, genuinely touching."""
         import numpy as np
@@ -305,7 +314,7 @@ class TestRegions:
         m = np.zeros((80, 120), bool)
         m[20:60, 10:50] = True     # the product
         m[38:42, 50:110] = True    # a thin lobe joined to it
-        out = clean(m, open_radius=4)
+        out = clean(m, open_radius=4, prune=True)
         assert out[40, 30], "product survived"
         assert not out[40, 100], "lobe removed"
 

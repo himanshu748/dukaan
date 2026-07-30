@@ -149,16 +149,24 @@ def _morph(mask: np.ndarray, k: int, grow: bool) -> np.ndarray:
 OPEN_RADIUS = 0
 
 
-def clean(mask: np.ndarray, open_radius: int = OPEN_RADIUS) -> np.ndarray:
-    """Drop stray blobs, close small holes, then cut off thin-necked lobes.
+def clean(mask: np.ndarray, open_radius: int = OPEN_RADIUS,
+          prune: bool = False) -> np.ndarray:
+    """Close the small holes inside the product. Nothing else, by default.
 
-    The last step is what removes a patch of backdrop that the fit misread and
-    that happens to touch the product, which no amount of component counting
-    can separate because it is genuinely connected. Eroding first breaks the
-    neck, the product survives as the largest surviving core, and dilating back
-    and intersecting restores its true edge rather than a rounded-off one.
+    `largest_region` is deliberately NOT applied here, and that is the whole
+    lesson of this module. It looks obviously right, because a misread patch of
+    backdrop is usually a small separate blob. But fine detail fragments the
+    mask too: the silver bracelet's engraved lower band is thin and barely
+    darker than the sweep behind it, so it comes back as 1,507 pieces, of which
+    exactly one is the body. Pruning to the largest deleted 7,555 pixels across
+    1,506 regions, and those pixels were the band. It survived as a broken,
+    half-missing arc in every one of the four styles.
+
+    So the rule is inverted: keep everything unless there is a specific reason
+    not to. `prune=True` is there for a caller that knows its photograph has a
+    detached artefact and no fine detail to lose.
     """
-    m = fill_holes(largest_region(mask))
+    m = fill_holes(largest_region(mask) if prune else mask)
     if open_radius <= 0:
         return m
     core = largest_region(_morph(m, open_radius, grow=False))

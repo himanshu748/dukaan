@@ -26,10 +26,13 @@ from PIL import Image, ImageDraw, ImageFont
 
 from dukaan.spec import STYLES_BY_NAME
 
+#: Built from the festive column of the style matrix, because festive is the
+#: look whose background changes most, which is exactly the contrast this
+#: figure exists to show. Same packs the grid uses, so the two cannot disagree.
 PACKS = [
-    ("out/gilt-bangles", "gilt bangles"),
-    ("out/brass-ewer", "brass ewer"),
-    ("out/silver-bracelet", "silver bracelet"),
+    ("out/matrix-festive/gilt-bangles", "gilt bangles"),
+    ("out/matrix-festive/brass-ewer", "brass ewer"),
+    ("out/matrix-festive/silver-bracelet", "silver bracelet"),
 ]
 PAD = 0.06
 CELL = 300

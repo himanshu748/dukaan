@@ -126,9 +126,8 @@ audio-video diffusion model, plus its Gemma 3 12B text encoder, a spatial
 upscaler and two LoRAs. There is no image-only model on disk.
 
 Fetching one is awkward rather than impossible, and the reason is worth
-recording for anyone else building on this hardware. The instance sits in
-mainland China (egress 36.150.116.194, Zhengzhou), so `huggingface.co` times out
-and `github.com` resolves to an address that refuses instantly. PyPI,
+recording for anyone else building on this hardware. The instance's outbound
+network cannot reach `huggingface.co` or `github.com` directly. PyPI,
 `raw.githubusercontent.com`, `hf-mirror.com` and `modelscope.cn` all answer
 normally, so weights can be pulled through a mirror with
 `HF_ENDPOINT=https://hf-mirror.com`.

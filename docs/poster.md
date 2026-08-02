@@ -33,49 +33,45 @@ One photo, four looks, with the input plate available for comparison:
 
 ---
 
-## The finding: the instance cannot run its own template
+## The finding: isolate the supplied model phases
 
 | | |
 |---|---|
 | LTX-2.3 checkpoint | 43 GB |
 | Gemma 3 12B text encoder | 23 GB |
 | **Total to load** | **66 GB** |
-| **Container cap** | **55 GB** |
 
-ComfyUI holds every model a graph touches for the life of the process. Loading
-both trips the cap and **the platform restarts the container mid-prompt**:
-JupyterLab returns with zero kernels, the port stops answering, and it presents
-as a network fault.
+ComfyUI holds every model a graph touches for the life of the process. Dukaan
+uses an explicit process boundary so the encoder is released before the
+diffusion checkpoint loads.
 
 ## The fix: two processes that never overlap
 
-| phase | peak container RAM | wall |
+| phase | wall | process boundary |
 |---|---|---|
-| encode, text encoder only | 35.4 GB | 33 s |
-| sample, checkpoint only | 51.2 GB | 55 s |
-| *stock template, one process* | *trips 55 GB, restarts* | *n/a* |
+| encode, text encoder only | 33 s | exits before sampling |
+| sample, checkpoint only | 55 s | starts after encoding |
 
 Peak becomes `max(43, 23)`, not `43 + 23`.
 
-Plus: bf16 conditioning (it is read back while the checkpoint is resident),
-VRAM eviction before the VAE decode (the decode died with 2.13 GB free out of
-47.98), and `torch.inference_mode()` around the phase (the LTX VAE updates the
-sampler's output in place).
+Plus: bf16 conditioning, VRAM eviction before the VAE decode, and
+`torch.inference_mode()` around the phase because the LTX VAE updates the
+sampler's output in place.
 
 ---
 
 ## Measured
 
-| setting | output | GPU | peak RAM |
-|---|---|---|---|
-| 768x768, 49 frames | 768x768 | 70.7 s | 49.9 GB |
-| 768x768, refined | **1536x1536** | 176.1 s | 49.9 GB |
-| 3 products, one batch | 768x768 | **134.3 s** | 49.9 GB |
+| setting | output | GPU |
+|---|---|---|
+| 768x768, 49 frames | 768x768 | 70.7 s |
+| 768x768, refined | **1536x1536** | 176.1 s |
+| 3 products, one batch | 768x768 | **134.3 s** |
 
-Every run holds under the 55 GB cap. `dukaan bench` reproduces the table.
+`dukaan bench` reproduces the timing table.
 
-Transport was a bottleneck too: 49 frames as 49 base64 requests took 3 m 34 s
-and reset the tunnel twice. One tar brought it to 2 m 19 s.
+Transport was a bottleneck too. Returning the frame set as one archive avoids
+the overhead of a request per frame.
 
 ## Batching is the lever that removes work rather than trading it
 

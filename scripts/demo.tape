@@ -28,14 +28,14 @@ Sleep 500ms
 Type "# What am I about to run on?"
 Enter
 Sleep 500ms
-Type ".venv/bin/dukaan doctor"
+Type ".venv/bin/dukaan styles"
 Enter
-Sleep 12s
+Sleep 2s
 
-Type "# 48 GB of VRAM behind a container capped at 55 GB of RAM."
+Type "# The encoder and diffusion checkpoint run in separate processes."
 Sleep 1s
 Enter
-Type "# The model pair it has to load is 66 GB. That is the whole problem."
+Type "# One exits before the other loads, with bf16 conditioning between them."
 Sleep 2s
 Enter
 Sleep 1s
@@ -54,7 +54,7 @@ Type "  --headline 'Handmade brass ewer' \"
 Enter
 Type "  --subline '1,450 rupees, free delivery in the city' \"
 Enter
-Type "  --style festive --contact '+91 90000 00000'"
+Type "  --style festive --contact '@your-shop'"
 Enter
 Sleep 170s
 

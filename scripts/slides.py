@@ -144,13 +144,12 @@ def batching_card(out: Path) -> None:
 
 def finding_card(out: Path) -> None:
     img, d = _slide()
-    y = _title(d, "The instance cannot run its own template",
-               "ComfyUI holds every model a graph touches for the life of the process.")
+    y = _title(d, "Isolate the supplied model phases",
+               "The encoder is released before the diffusion checkpoint loads.")
     rows = [
         ("LTX-2.3 diffusion checkpoint", "43 GB", DIM),
         ("Gemma 3 12B text encoder", "23 GB", DIM),
         ("Total to load", "66 GB", INK),
-        ("Container cap", "55 GB", ACCENT),
     ]
     ry = y + 30
     for label, value, colour in rows:
@@ -159,10 +158,10 @@ def finding_card(out: Path) -> None:
         ry += 52
     d.line([(110, ry + 6), (900, ry + 6)], fill=(60, 60, 70), width=2)
     d.text((110, ry + 30),
-           "Loading both trips the cap and the platform restarts the container",
+           "Two explicit processes keep the model phases from overlapping.",
            font=_font(24), fill=INK)
     d.text((110, ry + 62),
-           "mid-prompt. It presents as a network fault. It is not.",
+           "The handoff is bf16 conditioning written between the phases.",
            font=_font(24), fill=INK)
     img.save(out)
 
@@ -186,10 +185,10 @@ def fix_card(out: Path) -> None:
     y = _title(d, "Two processes that never overlap",
                "Peak becomes max(43, 23) instead of 43 + 23.")
     rows = [
-        ("phase", "peak container RAM", "wall", INK),
-        ("encode, text encoder only", "35.4 GB", "33 s", DIM),
-        ("sample, checkpoint only", "51.2 GB", "55 s", DIM),
-        ("stock template, one process", "trips 55 GB, restarts", "n/a", ACCENT),
+        ("phase", "wall", "boundary", INK),
+        ("encode, text encoder only", "33 s", "then exits", DIM),
+        ("sample, checkpoint only", "55 s", "starts second", DIM),
+        ("combined residency", "not used", "by design", ACCENT),
     ]
     ry = y + 30
     for a, b, c, colour in rows:

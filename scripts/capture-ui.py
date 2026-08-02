@@ -20,7 +20,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 HEADLINE = "Blue-and-white porcelain vase"
 SUBLINE = "3,200 rupees, ships anywhere in India"
-CONTACT = "+91 90000 00000"
+CONTACT = "@your-shop"
 
 shots = 0
 

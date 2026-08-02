@@ -66,7 +66,7 @@ def build_ui(cfg: Config | None = None) -> gr.Blocks:
                 photo = gr.Image(label="Your product photo", type="pil", height=250)
                 headline = gr.Textbox(label="Headline", placeholder="Handmade brass ewer")
                 subline = gr.Textbox(label="Price or offer", placeholder="1,450 rupees, free delivery")
-                contact = gr.Textbox(label="Phone or handle", placeholder="+91 90000 00000")
+                contact = gr.Textbox(label="Phone or handle", placeholder="@your-shop")
                 style = gr.Radio([s.name for s in STYLES], value="festive", label="Look",
                                  info=" · ".join(f"{k}: {v}" for k, v in STYLE_BLURB.items()))
                 go = gr.Button("Make my pack", variant="primary")

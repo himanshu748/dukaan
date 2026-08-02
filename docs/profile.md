@@ -125,12 +125,8 @@ The instance carries exactly one generative model: `ltx-2.3-22b-dev`, an
 audio-video diffusion model, plus its Gemma 3 12B text encoder, a spatial
 upscaler and two LoRAs. There is no image-only model on disk.
 
-Fetching one is awkward rather than impossible, and the reason is worth
-recording for anyone else building on this hardware. The instance's outbound
-network cannot reach `huggingface.co` or `github.com` directly. PyPI,
-`raw.githubusercontent.com`, `hf-mirror.com` and `modelscope.cn` all answer
-normally, so weights can be pulled through a mirror with
-`HF_ENDPOINT=https://hf-mirror.com`.
+The Radeon template pre-provisions the model weights. Dukaan uses those local
+assets and does not fetch or replace model weights at runtime.
 
 Dukaan still uses LTX alone, by choice rather than by constraint. The 43 GB
 checkpoint is already on disk, and a video model turns out to be the better
@@ -239,23 +235,17 @@ names the shapes the model reaches for.
 
 ## 5. Adaptation for AMD Radeon GPU and ROCm
 
-### 5.1 The instance cannot run the template it ships with
+### 5.1 The supplied model phases must be isolated
 
 | | |
 |---|---|
 | LTX-2.3 diffusion checkpoint | 43 GB |
 | Gemma 3 12B text encoder | 23 GB |
 | **Total to load** | **66 GB** |
-| Container cap, `/sys/fs/cgroup/memory.max` | **55 GB** |
 
 ComfyUI's server holds every model a graph touches for the life of the process.
-Loading both trips the cap and the platform restarts the container mid-prompt.
-JupyterLab returns with zero kernels, port 8188 stops answering, and anything
-written outside the persistent volume is gone. It presents as a network fault.
-
-This was diagnosed by watching `memory.current` during a load and reading
-`/proc/1`'s start time across a failure, which showed the container itself being
-replaced rather than the process dying.
+The safe execution boundary is therefore explicit: finish prompt encoding,
+release that process, and only then load the diffusion checkpoint.
 
 ### 5.2 The fix: two processes that never overlap
 
@@ -269,13 +259,13 @@ phase 2   load the diffusion checkpoint, read the conditioning back,
           sample, write frames and audio, exit
 ```
 
-Peak becomes `max(43, 23)` instead of `43 + 23`. Measured on the box:
+The resident model footprint becomes `max(43, 23)` instead of `43 + 23`.
+Measured phase timings on the Radeon environment:
 
-| phase | peak container RAM | wall |
+| phase | wall | process boundary |
 |---|---|---|
-| encode | 35.4 GB | 33 s |
-| sample | 51.2 GB | 55 s |
-| stock template, one process | trips 55 GB, container restarts | n/a |
+| encode | 33 s | exits before sampling |
+| sample | 55 s | starts after encoding |
 
 ### 5.3 Batching, the one lever that changes the shape of the cost
 
@@ -310,19 +300,17 @@ of them until the transformer is gone is cheap.
 
 ### 5.4 Three further adaptations
 
-**bf16 conditioning.** The conditioning is read back while the 43 GB checkpoint
-is already resident, so every megabyte comes off the remaining 4 GB of headroom.
-Writing it in bf16 halved it, 1470 MB to 735 MB. It fell under one megabyte once
-the correct AV encoder replaced a plain `CLIPLoader`, which is also how the
-wrong encoder was caught: LTX-2.3's text embeddings carry both a video and an
-audio stream, and the plain loader produced a 4-D tensor the model rejected.
+**bf16 conditioning.** Writing the interchange payload in bf16 halves its size.
+It fell under one megabyte once the correct AV encoder replaced a plain
+`CLIPLoader`, which is also how the wrong encoder was caught: LTX-2.3's text
+embeddings carry both a video and an audio stream, and the plain loader produced
+a 4-D tensor the model rejected.
 
 **VRAM eviction before the VAE decode.** ComfyUI's executor evicts models
 between nodes. Calling node classes directly skips that, so the 22B transformer
-was still resident when the VAE ran and the decode failed with 2.13 GB free out
-of 47.98. Calling `model_management.unload_all_models()` before the decode drops
-the container from 51.2 GB to 12.5 GB and frees the VRAM the decode needs.
-Tiled decode (512 px spatial, 32-frame temporal chunks) bounds the peak.
+can remain resident when the VAE runs. Calling
+`model_management.unload_all_models()` before decode frees the VRAM the decoder
+needs. Tiled decode also bounds the working set.
 
 **`torch.inference_mode()` around the whole phase.** The LTX VAE updates the
 sampler's output in place, and torch refuses that across the inference-mode
@@ -330,31 +318,17 @@ boundary. ComfyUI wraps every graph this way; calling nodes directly has to do
 the same.
 
 `PYTORCH_ALLOC_CONF=expandable_segments:True` is set for the sampling phase to
-keep HIP allocator fragmentation from re-introducing the OOM.
+reduce HIP allocator fragmentation.
 
-### 5.5 How the memory numbers were measured
+### 5.5 Measured results
 
-Reading `memory.current` when a run finishes reports about 12 GB, because the
-models have already been evicted by then. Quoting that as the pipeline's
-footprint would be flattering and wrong, and it is the number an obvious
-implementation reports: the first version of the benchmark did exactly this and
-claimed 11.8 GB for a pipeline whose real peak is over 50.
-
-The kernel's own `memory.peak` is not usable either. Resetting it needs a write
-this kernel rejects, so it reports the high-water mark since the container
-booted rather than since the run started. Dukaan therefore samples
-`memory.current` on a thread every 200 ms and keeps the maximum, which is
-per-run by construction and costs one file read per sample.
-
-### 5.6 Measured results
-
-| setting | output | GPU time | peak container RAM | MPx-frames/s |
-|---|---|---|---|---|
-| 512x512, 25 frames | 512x512 | 45.5 s | 49.8 GB | 0.14 |
-| 768x768, 25 frames | 768x768 | 54.6 s | 49.9 GB | 0.27 |
-| 768x768, 49 frames | 768x768 | 70.7 s | 49.9 GB | 0.41 |
-| 768x768, 49 frames, refined | **1536x1536** | 176.1 s | 49.9 GB | 0.66 |
-| **3 products, one batch** | 768x768 | **134.3 s** | 49.9 GB | vs 212.1 s separately |
+| setting | output | GPU time | MPx-frames/s |
+|---|---|---|---|
+| 512x512, 25 frames | 512x512 | 45.5 s | 0.14 |
+| 768x768, 25 frames | 768x768 | 54.6 s | 0.27 |
+| 768x768, 49 frames | 768x768 | 70.7 s | 0.41 |
+| 768x768, 49 frames, refined | **1536x1536** | 176.1 s | 0.66 |
+| **3 products, one batch** | 768x768 | **134.3 s** | vs 212.1 s separately |
 
 Reproduce with `dukaan bench <photo>`; the raw JSON is in `bench-results/`.
 Throughput rises with the size of the job because the 13.8 s model load is
@@ -362,38 +336,23 @@ fixed, which is the whole argument for the batch.
 
 A single pack end to end, including the plate upload, both model loads, sampling,
 decode and pulling 49 frames plus a wav back over the tunnel, is about 2 m 20 s
-wall clock. Before frames were fetched as one tar it was 3 m 34 s, and the tunnel
-reset the connection twice mid-run.
+wall clock. Returning the frame set as one archive avoids per-frame request
+overhead.
 
 Batching measured on the same settings as row 3: 13.8 s of model load paid once,
 then 36.3 s, 28.0 s and 26.6 s for three identical products as the GPU warms.
 
-### 5.7 Two template defects worth reporting upstream
+### 5.6 Two template defects worth reporting upstream
 
-- The LTX notebook's own cell invokes `start_comfyui_with_rc_tunnel.sh`; the
-  file on disk is `start_comfyui_with_tunnel.sh`. Run All fails.
-- ComfyUI runs from `/opt/venv`, not the system python, so starting it by hand
-  the obvious way gives `No module named 'sqlalchemy'`.
+- The LTX notebook launcher name does not match the supplied launcher, so Run
+  All fails.
+- Starting the service with the system interpreter misses its project
+  dependencies.
 
 ## 6. Verification
 
-`dukaan doctor` reports what a run would actually use before it costs anything:
-
-```
-video_encoder: ffmpeg
-arch: gfx1100
-vram_gb: 48.0
-compute_units: 48
-torch: 2.10.0+rocm7.2.4.git3d3aa833
-card_model: 0x744b
-container_ram_cap_gb: 55.0
-runner: yes
-ready
-```
-
-`rocm-smi` cannot reach libdrm inside this container and torch returns an empty
-device name, so the architecture, PCI model id and CU count stand in. They are
-what the driver will actually report.
+`dukaan doctor` checks the Radeon architecture, ROCm-enabled torch build,
+runtime preconditions, runner availability and MP4 encoder before a paid run.
 
 The automated suite runs with no GPU. It covers cases that were genuinely wrong
 at some point: phone EXIF orientation, safe output paths, a graded backdrop, a

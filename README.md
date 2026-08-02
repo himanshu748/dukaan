@@ -39,7 +39,7 @@ Without a GPU it runs against a CPU mock, which exercises the whole pipeline
 and writes real files, so you can see the layout before spending anything:
 
 ```bash
-.venv/bin/dukaan pack examples/brass-ewer.png --headline "Handmade brass ewer" --subline "1,450 rupees, free delivery in the city" --style festive --contact "+91 90000 00000"
+.venv/bin/dukaan pack examples/brass-ewer.png --headline "Handmade brass ewer" --subline "1,450 rupees, free delivery in the city" --style festive --contact "@your-shop"
 ```
 
 For real generation, point it at the Radeon instance's JupyterLab URL, push the
@@ -51,19 +51,8 @@ export DUKAAN_INSTANCE=https://<host>/instances/<instance-id>
 .venv/bin/dukaan doctor
 ```
 
-`doctor` on the box this was built against:
-
-```
-video_encoder:   ffmpeg
-arch: gfx1100
-vram_gb: 48.0
-compute_units: 48
-torch: 2.10.0+rocm7.2.4.git3d3aa833
-card_model: 0x744b
-container_ram_cap_gb: 55.0
-runner: yes
-ready
-```
+`doctor` checks the Radeon architecture, ROCm-enabled torch build, runtime
+preconditions, configured runner and MP4 encoder before a paid run.
 
 Then the same `pack` command generates for real. One pack is about 75 seconds of
 GPU time and a little over two minutes wall clock, including the transfers.
@@ -86,7 +75,7 @@ and the text encoder about 9, every single time, so packing a folder one photo
 at a time pays that toll per item for nothing:
 
 ```bash
-.venv/bin/dukaan catalogue ~/photos --style studio --contact "+91 90000 00000"
+.venv/bin/dukaan catalogue ~/photos --style studio --contact "@your-shop"
 ```
 
 ```
@@ -118,23 +107,20 @@ recomposes the same stills with new type and never touches the GPU:
 `dukaan styles` lists the four looks and the three formats. `dukaan bench`
 re-measures the table below on your own hardware.
 
-## The interesting part: the instance cannot run its own template
+## The interesting part: isolate the supplied model phases
 
-The Radeon instance ships a ComfyUI template for LTX-2.3. It does not work, and
-it takes the whole instance down when you try.
+The supplied LTX-2.3 graph needs a large text encoder and diffusion checkpoint.
+Dukaan does not rely on both remaining resident together.
 
 | | |
 |---|---|
 | LTX-2.3 diffusion checkpoint | 43 GB |
 | Gemma 3 12B text encoder | 23 GB |
 | **Total to load** | **66 GB** |
-| Container memory cap (`/sys/fs/cgroup/memory.max`) | **55 GB** |
 
 ComfyUI's server holds every model a graph touches for the life of the process,
-so loading both trips the cap. The platform restarts the container mid-prompt:
-JupyterLab comes back with zero kernels, the port stops answering, and anything
-written outside the persistent volume is gone. It looks like a network fault. It
-is not.
+so the safe execution boundary is explicit: finish prompt encoding, release that
+process, and only then load the diffusion checkpoint.
 
 `scripts/radeon_ltx.py` runs the same graph in two processes that never overlap:
 
@@ -145,35 +131,28 @@ phase 2   load the diffusion checkpoint, read the conditioning back, sample,
           write frames and audio, exit
 ```
 
-Peak becomes `max(43, 23)` instead of `43 + 23`. Measured on the box:
+The resident model footprint becomes `max(43, 23)` instead of `43 + 23`.
+Measured phase timings on the Radeon environment:
 
-| phase | peak container RAM | wall |
+| phase | wall | process boundary |
 |---|---|---|
-| encode, text encoder only | 35.4 GB | 33 s |
-| sample, checkpoint only | 49.9 GB | 55 s |
-| *stock template, one process* | *trips 55 GB, container restarts* | *n/a* |
-
-Peak is sampled every 200 ms during the run. Reading it at the end instead
-reports about 12 GB, because the models have already been evicted by then, and
-that is the number a naive benchmark prints.
+| encode, text encoder only | 33 s | exits before sampling |
+| sample, checkpoint only | 55 s | starts after encoding |
 
 Three smaller things were needed to make it hold:
 
-- **Conditioning is written in bf16.** It is read back while the 43 GB
-  checkpoint is already resident, so every megabyte comes straight off the
-  headroom: 1470 MB to 735 MB. It fell to under one megabyte once the right
-  encoder was in use, which is also how the wrong one was caught.
+- **Conditioning is written in bf16.** This halves the interchange payload. It
+  fell below one megabyte once the right encoder was in use, which is also how
+  the wrong one was caught.
 - **Models are evicted from VRAM before the VAE decode.** ComfyUI's executor
-  does this between nodes; calling node classes directly skips it, and the
-  decode died with 2 GB free out of 48.
+  does this between nodes; calling node classes directly skips it and can leave
+  too little room for the decoder.
 - **Everything runs under `torch.inference_mode()`.** The LTX VAE updates the
   sampler's output in place, which torch refuses across that boundary.
 
-Two things about the shipped template are worth reporting upstream: its own
-notebook cell references `start_comfyui_with_rc_tunnel.sh` while the file on
-disk is `start_comfyui_with_tunnel.sh`, so Run All fails; and ComfyUI runs from
-`/opt/venv`, not the system python, which is why starting it by hand gives
-`No module named 'sqlalchemy'`.
+Two template integration issues are documented for upstream follow-up: the
+notebook launcher name does not match the supplied launcher, and starting the
+service with the system interpreter misses its project dependencies.
 
 ## How a pack is built
 

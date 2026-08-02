@@ -63,7 +63,7 @@ Type "# Three formats, three different moments of one generated clip."
 Sleep 2s
 Enter
 Sleep 1s
-Type "ls -la out/brass-ewer/*.png out/brass-ewer/*.wav"
+Type "ls -la out/brass-ewer/*.png out/brass-ewer/*.wav out/brass-ewer/*.mp4"
 Enter
 Sleep 6s
 

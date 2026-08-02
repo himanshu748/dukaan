@@ -21,13 +21,13 @@ the bangle they will ship.
 
 One photo becomes a square for the feed, a 9:16 for stories, a wide banner for a
 shop header, and a short clip with generated ambient audio. The product is
-carried through untouched. The price and phone number are composited with real
-type, never drawn by a model.
+screened against the input plate and shown for review. The price and phone
+number are composited with real type, never drawn by a model.
 
 **The GPU runs once per pack, not once per format.** Three formats are three
 different moments of the same generated clip.
 
-One photo, four looks, the product identical in every one:
+One photo, four looks, with the input plate available for comparison:
 
 ![four styles](gallery/one-photo-four-styles.png)
 
@@ -99,9 +99,10 @@ for identical work. A 37% saving on three; it grows with the catalogue.
 per channel on the border ring, refit once with the worst residuals dropped. A
 plane left an elliptical pool of backdrop exactly where the product sits.
 
-**Stills are picked for spread, then sharpness.** Contiguous windows, highest
-Laplacian variance in each. Frame 0 is never eligible: it is the plate the model
-was handed.
+**Stills are picked for spread, reference consistency and sharpness.** The
+reference signal gets most of the score inside each contiguous window, with
+sharpness preventing a soft frame from winning. Frame 0 is never eligible: it
+is the plate the model was handed.
 
 **Reshaping mirrors, it does not crop or stretch.** Cover-cropping a square to
 9:16 cuts the product; clamping the edge row drew the bokeh into horizontal
@@ -111,6 +112,8 @@ streaks.
 
 ![banner](gallery/silver-bracelet-banner.png)
 
-**26 tests, no GPU required.** Without an instance configured, the whole
-pipeline runs on CPU and writes real files, so the tool can be inspected before
-any spend. Apache-2.0. Demo photographs are CC0.
+**Automated tests, no GPU required.** They cover MP4 export, safe output paths,
+phone EXIF orientation, reference-aware selection and catalogue audit records.
+Without an instance configured, the whole pipeline runs on CPU and writes real
+files, so the tool can be inspected before any spend. Apache-2.0. Demo
+photographs are CC0.

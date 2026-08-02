@@ -34,6 +34,10 @@ class Config:
     strength: float = float(os.getenv("DUKAAN_STRENGTH", "0.7"))
     #: Second pass at 2x resolution. Roughly doubles the run.
     refine: bool = os.getenv("DUKAAN_REFINE", "").lower() in {"1", "true", "yes"}
+    #: A lightweight, model-free consistency heuristic ranks generated frames
+    #: against the plate.  It is a warning/ranking signal, not a claim that the
+    #: product is pixel-identical after generation.
+    consistency_warn: float = float(os.getenv("DUKAAN_CONSISTENCY_WARN", "0.45"))
 
     out_dir: Path = field(default_factory=lambda: Path(os.getenv("DUKAAN_OUT", "out")))
 

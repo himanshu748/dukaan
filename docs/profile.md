@@ -28,8 +28,9 @@ is the wrong trade. A seller cannot post a picture of a bangle that is not the
 bangle they will ship. Whatever the model does, the object has to survive it.
 
 Dukaan takes one photograph and returns a set of finished creatives plus a short
-clip with sound, generated on a Radeon GPU, with the product carried through
-untouched and the words composited rather than drawn.
+clip with sound, generated on a Radeon GPU. It ranks selected frames against the
+input plate for reference consistency, asks the seller to review the product,
+and composites the seller's words rather than asking a model to draw them.
 
 ## 2. Target users and application scenarios
 
@@ -45,7 +46,7 @@ commission artwork for it.
 |---|---|
 | New stock arrives, needs a feed post today | 1024x1024 square with headline, price line and contact |
 | Festival push, same products, seasonal look | Same photos re-run under the `festive` style, no re-shoot |
-| Story or reel slot | 1024x1820 still plus a 2-second clip with generated ambient audio |
+| Story or reel slot | 1024x1820 still plus an H.264/AAC MP4 with generated ambient audio |
 | Marketplace or shop-page header | 1820x1024 banner |
 | Price change | `dukaan relabel` recomposes the same stills with new type, no GPU |
 | Wrong moment in the shot | The browser UI's scrubber rebuilds from any of the 49 frames, no GPU |
@@ -74,12 +75,12 @@ decision in section 3.
     |                                          49 frames + stereo wav
     |   <----------- one tar over the JupyterLab API ---+
     |
-    +-- pick one still per format (sharpness within spread windows)
+    +-- pick one still per format (reference consistency + sharpness)
     +-- reshape by reflection to each aspect
     +-- composite headline, subline, contact strip
     |
     v
-  square / story / banner / clip.gif / clip.wav / manifest.json
+  square / story / banner / clip.mp4 / preview.gif / wav / manifest.json
 ```
 
 **Transport.** The cloud exposes JupyterLab over HTTPS and nothing else: no ssh,
@@ -89,8 +90,9 @@ that process's stdout. Long jobs are started under `setsid` so a culled kernel
 cannot take them down, and progress is read back from their logs.
 
 **Split of work.** Everything cheap and deterministic stays on the CPU on
-purpose. The cutout is a least-squares fit; the still selection is a Laplacian
-variance; the reshaping is an index map; the type is a font. Spending GPU
+purpose. The cutout is a least-squares fit; the still selection combines a
+small structural and colour descriptor with Laplacian variance; the reshaping
+is an index map; the type is a font. Spending GPU
 credits on any of them would be waste. The GPU does the one thing with no CPU
 equivalent, and it does it **once per pack** rather than once per output.
 
@@ -154,8 +156,9 @@ LTXVPreprocess -> LTXVImgToVideoInplace -> LTXVConcatAVLatent
 The sigma schedule and the 0.5 LoRA strength are taken from the shipped
 workflow, not tuned: the distilled LoRA is trained for that schedule.
 
-`strength=0.7` on `LTXVImgToVideoInplace` is the one lever deliberately kept
-low. It is what keeps the ewer an ewer.
+`strength=0.7` on `LTXVImgToVideoInplace` is deliberately kept low to reduce
+product drift. It cannot guarantee that a logo, engraving or stone stays exact,
+which is why the post-generation screening and human review remain required.
 
 ### 4.2 Background removal by fitting, not sampling
 
@@ -206,11 +209,18 @@ fix is a matting model, which section 8 lists as the next step.
 
 ### 4.3 Still selection
 
-Frames are split into as many contiguous windows as there are formats, and the
-frame with the highest Laplacian variance in each window wins. Spread first, or
-three formats receive three copies of one picture. Sharpness second, because a
-frame caught mid-push is soft and a soft still is what a printed banner cannot
-hide. Frame 0 is never eligible: it is the plate the model was handed.
+Frames are split into as many contiguous windows as there are formats. Inside
+each window, a lightweight reference-consistency heuristic compares central
+edge structure and colour against the input plate at several zooms. That signal
+receives most of the score, while Laplacian variance prevents a blurred frame
+from winning. Frame 0 is never eligible: it is the plate the model was handed.
+
+The score is a screening and ranking signal, not an identity metric. Every
+selected score, threshold and warning is written to the manifest, and the UI
+lets the seller inspect or replace a selected frame without another GPU call.
+`dukaan catalogue` also writes `catalogue-audit.json` with attempted,
+completed, failed and review-required counts so a phone-photo field evaluation
+can report failures rather than hiding them.
 
 ### 4.4 Reshaping without cropping the product
 
@@ -371,6 +381,7 @@ then 36.3 s, 28.0 s and 26.6 s for three identical products as the GPU warms.
 `dukaan doctor` reports what a run would actually use before it costs anything:
 
 ```
+video_encoder: ffmpeg
 arch: gfx1100
 vram_gb: 48.0
 compute_units: 48
@@ -385,11 +396,11 @@ ready
 device name, so the architecture, PCI model id and CU count stand in. They are
 what the driver will actually report.
 
-26 tests run with no GPU. They cover the cases that were genuinely wrong at some
-point: a graded backdrop, a product touching the frame edge, a cutout with a
-wide transparent margin rendering tiny, `thumbnail()` refusing to enlarge, a
-product running into the headline band, stills landing on the same frame, and
-reflection versus streaking when a frame is reshaped.
+The automated suite runs with no GPU. It covers cases that were genuinely wrong
+at some point: phone EXIF orientation, safe output paths, a graded backdrop, a
+product touching the frame edge, reference-aware selection, MP4 muxing,
+catalogue audit records and reflection versus streaking when a frame is
+reshaped.
 
 Without `DUKAAN_INSTANCE` the whole pipeline runs against a CPU mock and writes
 real files, so the tool can be inspected before any GPU spend. The mock is never
@@ -397,5 +408,6 @@ a fallback: if an instance is configured and fails, the error surfaces.
 
 ## 7. Results
 
-Nine creatives and three clips with audio, all generated on the Radeon, are in
-`docs/gallery.md`. Source, tests and the runner are in the repository.
+Nine creatives and three clip previews with audio, all generated on the Radeon,
+are in `docs/gallery.md`. New packs also export a ready-to-post H.264/AAC MP4.
+Source, tests and the runner are in the repository.

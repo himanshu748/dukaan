@@ -10,6 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def slug(value: str) -> str:
+    """Return one safe, portable path component for a product name.
+
+    Product names arrive from filenames, CLI flags and a browser form.  They
+    must never be able to escape the configured output directory or become a
+    shell/path fragment on the Radeon runner.
+    """
+    cleaned = "".join(c.lower() if c.isalnum() else "-" for c in value.strip())
+    return "-".join(part for part in cleaned.split("-") if part) or "product"
+
+
 @dataclass(frozen=True)
 class Format:
     name: str
@@ -116,6 +127,11 @@ class Brief:
     headline: str
     subline: str = ""
     style: str = "studio"
+
+    @property
+    def output_name(self) -> str:
+        """Filesystem-safe name while retaining the seller's original label."""
+        return slug(self.product)
 
     def styled(self) -> Style:
         if self.style not in STYLES_BY_NAME:

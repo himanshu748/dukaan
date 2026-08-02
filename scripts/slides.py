@@ -115,7 +115,7 @@ def gallery_card(out: Path, packs: list[tuple[Path, str, str]]) -> None:
 def styles_card(out: Path, sheet: Path) -> None:
     img, d = _slide()
     y = _title(d, "One photo, four looks",
-               "Only the style name changed. The product is identical in all four.")
+               "Only the style changed. Compare every result with the input plate.")
     im = Image.open(sheet).convert("RGB")
     im.thumbnail((W - 160, H - y - 120), Image.LANCZOS)
     img.paste(im, ((W - im.width) // 2, y + 40))

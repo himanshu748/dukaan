@@ -7,10 +7,10 @@ from PIL import Image
 
 from dukaan.backend import MockBackend, _fit, chroma_cutout
 from dukaan.config import Config
-from dukaan.frames import fit_scene, pick_frames, sharpness
+from dukaan.frames import fit_scene, pick_frames, reference_similarity, sharpness
 from dukaan.layout import compose, contact_strip
-from dukaan.pack import build_pack, make_plate, relabel
-from dukaan.spec import FORMATS, FORMATS_BY_NAME, STYLES_BY_NAME, Brief
+from dukaan.pack import build_catalogue, build_pack, make_plate, relabel, write_catalogue_audit
+from dukaan.spec import FORMATS, FORMATS_BY_NAME, STYLES_BY_NAME, Brief, slug
 
 
 def _photo(size=(400, 400), obj=(120, 120, 280, 280), bg=(240, 240, 238)) -> Image.Image:
@@ -103,6 +103,15 @@ class TestFrameSelection:
     def test_handles_no_frames(self):
         assert pick_frames([], 3) == []
 
+    def test_reference_consistency_prefers_the_same_product_over_sharp_noise(self):
+        reference = _photo((96, 96), (24, 24, 72, 72))
+        same = reference.filter(__import__("PIL.ImageFilter", fromlist=["x"]).GaussianBlur(0.7))
+        rng = np.random.default_rng(7)
+        noise = Image.fromarray(rng.integers(0, 256, (96, 96, 3), dtype=np.uint8), "RGB")
+        assert sharpness(noise) > sharpness(same)
+        assert reference_similarity(reference, same) > reference_similarity(reference, noise)
+        assert pick_frames([reference, same, noise], 1, reference=reference) == [1]
+
 
 class TestFitScene:
     def test_returns_exact_size_and_does_not_clip_the_frame(self):
@@ -145,14 +154,16 @@ class TestLayout:
                                         "delivered anywhere in the city"), fmt,
                        STYLES_BY_NAME["studio"])
         assert short.size == long.size == fmt.size
-        assert list(short.getdata()) != list(long.getdata())
+        assert not np.array_equal(np.asarray(short), np.asarray(long))
 
     def test_contact_strip_is_optional_and_changes_pixels(self):
         fmt = FORMATS_BY_NAME["square"]
         base = Image.new("RGB", fmt.size, (10, 10, 10))
         style = STYLES_BY_NAME["studio"]
-        assert list(contact_strip(base, "", style).getdata()) == list(base.getdata())
-        assert list(contact_strip(base, "+91 90000 00000", style).getdata()) != list(base.getdata())
+        assert np.array_equal(np.asarray(contact_strip(base, "", style)), np.asarray(base))
+        assert not np.array_equal(
+            np.asarray(contact_strip(base, "+91 90000 00000", style)), np.asarray(base)
+        )
 
 
 class TestPack:
@@ -184,6 +195,55 @@ class TestPack:
         res = build_pack(_cfg(tmp_path), MockBackend(), _photo(), Brief("pot", "Clay pots"))
         assert len(res.clip_frames) == 9
         assert res.clip and res.clip.exists()
+        if __import__("shutil").which("ffmpeg"):
+            assert res.video and res.video.exists() and res.video.stat().st_size > 0
+        else:
+            assert res.video is None and res.video_error
+
+    def test_manifest_records_consistency_and_ready_video(self, tmp_path: Path):
+        res = build_pack(_cfg(tmp_path), MockBackend(), _photo(), Brief("pot", "Clay pots"))
+        manifest = json.loads((tmp_path / "pot" / "studio_manifest.json").read_text())
+        assert set(manifest["reference_consistency"]) == {f.name for f in FORMATS}
+        assert all(0.0 <= v <= 1.0 for v in manifest["reference_consistency"].values())
+        assert manifest["video"] == (str(res.video) if res.video else None)
+
+    def test_phone_exif_orientation_is_applied_before_cutout(self, tmp_path: Path):
+        seen = []
+
+        class Capture(MockBackend):
+            def remove_background(self, photo):
+                seen.append(photo.size)
+                return super().remove_background(photo)
+
+        photo = _photo((80, 120), (20, 30, 60, 90))
+        photo.getexif()[274] = 6
+        build_pack(_cfg(tmp_path), Capture(), photo, Brief("pot", "Clay pots"))
+        assert seen == [(120, 80)]
+
+    def test_catalogue_rejects_colliding_safe_names_before_render(self, tmp_path: Path):
+        photo = tmp_path / "photo.png"
+        _photo().save(photo)
+        jobs = [
+            (photo, Brief("My Pot", "One"), ""),
+            (photo, Brief("my-pot", "Two"), ""),
+        ]
+        with pytest.raises(ValueError, match="same output folder"):
+            build_catalogue(_cfg(tmp_path), MockBackend(), jobs)
+
+    def test_catalogue_audit_counts_review_outcomes(self, tmp_path: Path):
+        res = build_pack(
+            _cfg(tmp_path, consistency_warn=1.0),
+            MockBackend(),
+            _photo(),
+            Brief("pot", "Clay pots"),
+        )
+        audit_path = write_catalogue_audit(
+            tmp_path / "catalogue-audit.json", [Path("phone-pot.jpg")], [res]
+        )
+        audit = json.loads(audit_path.read_text())
+        assert audit["attempted"] == audit["completed"] == 1
+        assert audit["failed"] == 0
+        assert audit["review_required"] == 1
 
     def test_no_clip_skips_the_frames(self, tmp_path: Path):
         res = build_pack(_cfg(tmp_path), MockBackend(), _photo(), Brief("pot", "Clay pots"),
@@ -261,6 +321,10 @@ class TestBrief:
     def test_offline_flag_follows_instance_url(self):
         assert Config(instance="").offline is True
         assert Config(instance="https://x/instances/y").offline is False
+
+    def test_product_name_is_one_safe_path_component(self):
+        assert slug("../../My Brass Pot") == "my-brass-pot"
+        assert Brief("../../My Brass Pot", "h").output_name == "my-brass-pot"
 
 
 class TestRegions:

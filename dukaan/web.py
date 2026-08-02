@@ -41,10 +41,6 @@ STYLE_BLURB = {
 }
 
 
-def _slug(name: str) -> str:
-    return "".join(c.lower() if c.isalnum() else "-" for c in name.strip()).strip("-") or "product"
-
-
 def build_ui(cfg: Config | None = None) -> gr.Blocks:
     cfg = cfg or load()
 
@@ -106,7 +102,7 @@ def build_ui(cfg: Config | None = None) -> gr.Blocks:
                 steps.append(msg)
                 progress(min(len(steps) / 7, 0.95), desc=msg)
 
-            brief = Brief(product=_slug(headline), headline=headline.strip(),
+            brief = Brief(product=headline, headline=headline.strip(),
                           subline=(subline or "").strip(), style=style)
             try:
                 result = build_pack(cfg, make_backend(cfg), photo, brief,
@@ -123,6 +119,16 @@ def build_ui(cfg: Config | None = None) -> gr.Blocks:
                 size = meta.get("size", ["?", "?"])
                 lines.append(f"GPU time **{meta['seconds']}s** for {meta.get('frames', '?')} frames "
                              f"at {size[0]}x{size[1]}. Every remaining moment is free.")
+            if result.reference_consistency:
+                weakest = min(result.reference_consistency.values())
+                lines.append(
+                    f"Lowest reference-consistency signal: **{weakest:.2f}**. "
+                    "This is a screening heuristic, so inspect the product before posting."
+                )
+            if result.video:
+                lines.append(f"Ready-to-post MP4: `{result.video.name}`.")
+            elif result.video_error:
+                lines.append(f"MP4 unavailable: {result.video_error}")
             st = {
                 "frames": [str(p) for p in result.clip_frames],
                 "headline": brief.headline, "subline": brief.subline,

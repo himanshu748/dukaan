@@ -7,14 +7,17 @@ A small seller photographs a thing on a counter with a phone. Dukaan cuts the
 product out, hands it to LTX-2.3 on the Radeon as a plain plate, gets back a
 short lit clip with sound, and lifts a still out of that clip for each format
 the seller actually posts: a square for the feed, a 9:16 for stories, a wide
-banner for a shop header. The product is never redrawn and the words are never
-generated, so the price and the phone number are exactly what was typed.
+banner for a shop header. The seller's words are never generated, so the price
+and phone number are exactly what was typed. Generated frames are ranked against
+the input plate for reference consistency and the seller can inspect or replace
+the chosen moment before posting. That screening is deliberately not described
+as a guarantee that a generative model preserved every product detail.
 
 The GPU runs **once per pack**, not once per format.
 
 ![square](docs/gallery/brass-ewer-square.png)
 
-One photo, four looks, the product identical in every one:
+One photo, four looks, with the plated reference beside the generated results:
 
 ![four styles](docs/gallery/one-photo-four-styles.png)
 
@@ -22,10 +25,9 @@ Every product under every look, twelve packs, one GPU pass each:
 
 ![style matrix](docs/gallery/style-matrix.png)
 
-The model is allowed to alter the product, so that it does not is measured
-rather than asserted. Plate on the left, then the frames each pack selected:
-
-![product survives](docs/gallery/product-survives.png)
+The model can alter a product. Dukaan therefore shows the plate beside selected
+frames in the gallery, ranks candidates with a reference-consistency heuristic,
+and requires a human check before publishing.
 
 ## Run it
 
@@ -52,6 +54,7 @@ export DUKAAN_INSTANCE=https://<host>/instances/<instance-id>
 `doctor` on the box this was built against:
 
 ```
+video_encoder:   ffmpeg
 arch: gfx1100
 vram_gb: 48.0
 compute_units: 48
@@ -70,8 +73,9 @@ GPU time and a little over two minutes wall clock, including the transfers.
   square  out/silver-bracelet/studio_square.png  (frame 13)
   story   out/silver-bracelet/studio_story.png   (frame 21)
   banner  out/silver-bracelet/studio_banner.png  (frame 48)
-  clip    out/silver-bracelet/studio_clip.gif (49 frames)
+  preview out/silver-bracelet/studio_clip.gif (49 frames)
   audio   out/silver-bracelet/studio_clip.wav
+  video   out/silver-bracelet/studio_clip.mp4 (H.264/AAC, ready to post)
   gpu     72.6s on radeon-ltx
 ```
 
@@ -87,11 +91,16 @@ at a time pays that toll per item for nothing:
 
 ```
 3 pack(s) via radeon-ltx
-  brass-ewer       3 creatives   stills from 1, 32, 48    45.8s
-  gilt-bangles     3 creatives   stills from 1, 30, 33    34.6s
-  silver-bracelet  3 creatives   stills from 13, 21, 48   23.2s
+  brass-ewer       3 creatives   stills 1, 32, 48    45.8s
+  gilt-bangles     3 creatives   stills 1, 30, 33    34.6s
+  silver-bracelet  3 creatives   stills 13, 21, 48   23.2s
 one model load of 17.9s shared across 3 product(s)
+audit out/catalogue-audit.json
 ```
+
+The command also prints each pack's minimum reference-consistency signal. The
+audit records attempted, completed, failed and review-required counts. No new
+consistency numbers are claimed until the repaired protocol is rerun on Radeon.
 
 Measured with `dukaan bench`: three products cost **134.3 s** batched against
 **212.1 s** run separately. The 13.8 s model load is paid once and per-product
@@ -173,7 +182,8 @@ photo -> cutout -> plate -> ONE GPU pass -> frames + audio
                                          |
                                          +-> pick a still per format
                                          |     -> compose type -> creatives
-                                         +-> clip (gif + wav)
+                                         +-> MP4 with audio
+                                         +-> GIF preview + WAV evidence
 ```
 
 **The cutout fits the background instead of sampling it.** Backdrops are rarely
@@ -190,12 +200,11 @@ product sits.
 makes it redecorate. Handing it the product on a flat wash leaves it the job of
 lighting a scene around something it must not change.
 
-**Stills are picked for spread, then sharpness.** Frames are split into as many
-windows as there are formats and the sharpest frame in each window wins. Spread
-first, or three formats get three copies of one picture; sharpness second,
-because a frame caught mid-push is soft and a soft still is the one thing a
-printed banner cannot hide. Frame 0 is never eligible: it is the plate the model
-was handed, so it shows none of what the model did.
+**Stills are picked for spread, reference consistency and sharpness.** Frames
+are split into as many windows as there are formats. Within each window,
+structural and colour similarity to the input plate receives most of the score,
+with sharpness breaking weak choices. Frame 0 is never eligible: it is the
+plate the model was handed, so it shows none of what the model did.
 
 **Reshaping extends by reflection.** A square frame becoming a 9:16 story cannot
 be cover-cropped, because the product lives in the sides that would be cut. The
@@ -232,17 +241,33 @@ cannot take them down, and progress is read back from their logs. Frames come
 home as one tar rather than fifty base64 requests, which halved wall time and
 stopped the tunnel resetting mid-pack.
 
+## Product-consistency boundary
+
+LTX is a generative model, so no prompt can guarantee that a logo, stone or
+engraving remained exact. Dukaan now gives every selected frame a lightweight
+`reference_consistency` signal based primarily on central structure, records it
+in the manifest, warns below `DUKAAN_CONSISTENCY_WARN`, and lets the seller move
+to any generated frame in the browser without another GPU call. The signal is a
+screening and ranking heuristic, not an identity metric.
+
+The current gallery uses credited CC0 catalogue photographs. Run `dukaan
+catalogue` on a folder of ordinary phone photographs to produce
+`catalogue-audit.json`, then publish successes, warnings and failures together.
+Plain or graded backgrounds are supported; clutter, transparent products and
+severe reflections remain documented limitations of the deterministic CPU
+cutout.
+
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
 ```
 
-26 tests, no GPU required. They cover the cases that were actually wrong at some
-point: a graded backdrop, a product touching the frame edge, a cutout with a
-wide transparent margin rendering tiny, `thumbnail()` refusing to enlarge, a
-product running into the headline band, stills landing on the same frame, and
-reflection versus streaking when a frame is reshaped.
+The automated suite runs with no GPU required. It covers the cases that were
+actually wrong at some point: phone EXIF orientation, safe output paths, a
+graded backdrop, a product touching the frame edge, reference-aware still
+selection, MP4 muxing, catalogue audits and reflection versus streaking when a
+frame is reshaped.
 
 ## Licence
 

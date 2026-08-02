@@ -7,9 +7,9 @@ stretched up. Each row is a single GPU pass: one clip, and
 three stills lifted from three different moments of it.
 
 The input photographs are CC0 museum object shots, credited in
-[../examples/CREDITS.md](../examples/CREDITS.md). Nothing in the product itself
-is generated: the model lights a scene around a cutout it is told not to change,
-and the type is composited afterwards.
+[../examples/CREDITS.md](../examples/CREDITS.md). LTX is generative and can alter
+the product even when prompted not to. The comparisons below are visual
+evidence, not a guarantee; the type is composited afterwards.
 
 ---
 
@@ -30,10 +30,10 @@ rings into two discs.
 Studio, festive and midnight keep the flat catalogue view they were given.
 Daylight, whose plate backdrop sits furthest from a plain sweep, sometimes
 re-stages instead: the silver bracelet comes back standing on the wooden surface
-with real depth rather than lying flat. Its identity is intact, the dragon heads,
-the engraving, the open gap and the border pattern all match the photograph, but
-the model has inferred volume that the flat input did not contain. That is worth
-knowing before choosing a style for a product whose exact shape matters.
+with real depth rather than lying flat. The dragon heads, engraving, open gap
+and border pattern appear consistent in this example, but the model has inferred
+volume that the flat input did not contain. A seller should still compare it to
+the plate before choosing that style for a product whose exact shape matters.
 
 The blue-and-white porcelain vase is deliberately absent. Its photograph carries
 a vignette behind the object that the backdrop fit cannot see, and the patch it
@@ -44,34 +44,29 @@ output would be the dishonest choice.
 
 ---
 
-## The product survives the generation
+## Reference and selected-frame comparison
 
-`strength=0.7` on the image-to-video conditioning means the model is genuinely
-allowed to alter the product, so this is a claim to be checked rather than
-asserted. Each row is one pack: the plate the model was handed, then the frames
-the pack actually selected.
+`strength=0.7` on the image-to-video conditioning can reduce drift but cannot
+prevent it. Each row is one historical pack: the plate the model was handed,
+then the frames the older selection protocol chose.
 
-![product survives](gallery/product-survives.png)
+The corrosion marks on the bangles, engraving and pitting on the ewer, and
+dragon heads on the bracelet appear consistent in these examples while the
+scene changes. These rows are useful visual evidence, but they are not a
+measured field success rate.
 
-The corrosion marks on the bangles, the engraving and pitting on the ewer, and
-the dragon heads on the bracelet all carry through unchanged while the scene
-around them is rebuilt completely. The brass ewer row is the clearest: a flat
-maroon wash becomes full festive bokeh, and the object does not move.
-
-This is shown rather than scored on purpose. A pixel metric against the plate
-measures the camera, not the product: the motion prompt pushes the camera in, so
-by the later frames the object is legitimately larger and in a different place,
-and a mask taken from the plate lands on the wrong pixels. Aligning that away
-was attempted several times and kept disagreeing with what the crops plainly
-show, so the crops are the evidence.
+The repaired pipeline now records a zoom-tolerant reference-consistency
+heuristic for screening and ranking. It is deliberately not called an identity
+score. Pixel comparisons remain misleading when the motion prompt changes scale
+and position, so final acceptance still belongs to the seller.
 
 ---
 
 ## One photo, four looks
 
 The same photograph under every style Dukaan ships. Only the style name changed
-between these four runs; the ewer is identical in all of them, which is the
-point. A seller cannot post a picture of a thing they will not ship.
+between these four runs. The plate is provided for comparison because a seller
+cannot post a picture of a thing they will not ship.
 
 ![four styles](gallery/one-photo-four-styles.png)
 
@@ -104,9 +99,8 @@ stretching the edge column instead drew the bokeh into horizontal streaks.
 
 ![clip](gallery/silver-bracelet-clip.gif)
 
-72.6 s of GPU time. The bangle's engraving survives the pass intact, which is
-the thing that matters: a seller cannot ship a creative where the model has
-redesigned the product.
+72.6 s of GPU time. The engraving appears consistent in this selected example;
+the repaired pipeline additionally flags low-consistency choices for review.
 
 ---
 

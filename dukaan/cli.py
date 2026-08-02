@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -14,7 +15,12 @@ from rich.table import Table
 from .backend import RadeonBackend, make_backend
 from .config import load
 from .instance import InstanceError
-from .pack import build_catalogue, build_pack, relabel as relabel_pack
+from .pack import (
+    build_catalogue,
+    build_pack,
+    relabel as relabel_pack,
+    write_catalogue_audit,
+)
 from .spec import FORMATS, FORMATS_BY_NAME, STYLES, Brief
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -54,6 +60,11 @@ def styles() -> None:
 def doctor() -> None:
     """Say plainly which backend a run would use, before it costs anything."""
     cfg = load()
+    ffmpeg = shutil.which("ffmpeg")
+    console.print(f"video_encoder:   {'ffmpeg' if ffmpeg else 'MISSING'}")
+    if not ffmpeg:
+        console.print("[yellow]Install ffmpeg to export a ready-to-post MP4.[/yellow]")
+
     if cfg.offline:
         console.print("[yellow]No DUKAAN_INSTANCE set.[/yellow] Runs use the mock CPU backend.")
         console.print("Point it at the Radeon instance for real generation:")
@@ -326,22 +337,32 @@ def catalogue(
         console.print("[yellow]mock backend[/yellow] (no DUKAAN_INSTANCE), output is a layout preview")
     console.print(f"{len(jobs)} product(s), one batch")
 
-    with console.status("building catalogue ..."):
-        results = build_catalogue(cfg, backend, jobs, write_clip=not no_clip,
-                                  on_step=lambda m: console.print(f"[dim]  {m}[/dim]"))
+    audit_path = cfg.out_dir / "catalogue-audit.json"
+    try:
+        with console.status("building catalogue ..."):
+            results = build_catalogue(cfg, backend, jobs, write_clip=not no_clip,
+                                      on_step=lambda m: console.print(f"[dim]  {m}[/dim]"))
+    except Exception as exc:
+        write_catalogue_audit(audit_path, photos, [], error=str(exc))
+        console.print(f"[red]catalogue failed[/red]; audit written to {audit_path}")
+        raise
+
+    write_catalogue_audit(audit_path, photos, results)
 
     table = Table(title=f"{len(results)} pack(s) via {backend.name}")
-    for col in ("product", "creatives", "stills from", "GPU s"):
+    for col in ("product", "creatives", "stills from", "consistency", "GPU s"):
         table.add_column(col)
     for r in results:
         table.add_row(r.brief.product, str(len(r.creatives)),
                       ", ".join(str(v) for v in r.frame_of.values()),
+                      f"{min(r.reference_consistency.values(), default=0):.2f}",
                       str(r.meta.get("sample_seconds", r.meta.get("seconds", "?"))))
     console.print(table)
     load_s = results[0].meta.get("model_load_seconds") if results else None
     if load_s:
         console.print(f"[green]one model load of {load_s}s[/green] shared across "
                       f"{len(results)} product(s)")
+    console.print(f"[green]audit[/green] {audit_path}")
 
 
 @app.command()

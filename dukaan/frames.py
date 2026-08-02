@@ -26,7 +26,66 @@ def sharpness(image: Image.Image) -> float:
     return float(lap.var())
 
 
-def pick_frames(frames: list[Image.Image], k: int) -> list[int]:
+def _centre_zoom(image: Image.Image, zoom: float) -> Image.Image:
+    """Crop around the product while allowing for the prompted camera push."""
+    if zoom <= 1.0:
+        return image
+    w, h = image.size
+    cw, ch = max(int(w / zoom), 1), max(int(h / zoom), 1)
+    x0, y0 = (w - cw) // 2, (h - ch) // 2
+    return image.crop((x0, y0, x0 + cw, y0 + ch))
+
+
+def _visual_features(image: Image.Image) -> tuple[np.ndarray, np.ndarray]:
+    """Small structural and colour descriptors requiring no extra model.
+
+    The scene background is expected to change, so the descriptor emphasises
+    central edges, where the plated product lives, and gives colour only a
+    small vote.  This cannot prove identity.  It is useful for rejecting an
+    obviously morphed frame before sharpness alone selects it.
+    """
+    img = image.convert("RGB").resize((72, 72), Image.BILINEAR)
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    arr = arr[8:-8, 8:-8]
+    gray = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
+    gx = np.diff(gray, axis=1, append=gray[:, -1:])
+    gy = np.diff(gray, axis=0, append=gray[-1:, :])
+    edges = np.sqrt(gx * gx + gy * gy).reshape(-1)
+    norm = float(np.linalg.norm(edges))
+    if norm:
+        edges /= norm
+
+    hist = []
+    for channel in range(3):
+        h, _ = np.histogram(arr[..., channel], bins=12, range=(0.0, 1.0))
+        hist.extend(h.astype(np.float32))
+    colour = np.asarray(hist, dtype=np.float32)
+    colour /= colour.sum() or 1.0
+    return edges, colour
+
+
+def reference_similarity(reference: Image.Image, candidate: Image.Image) -> float:
+    """Return a 0..1 consistency signal tolerant of a modest camera push.
+
+    It deliberately avoids the word "identity": only an object-aware model or
+    a human review can establish that.  The maximum over three reference zooms
+    stops a legitimate push-in from looking like product drift.
+    """
+    cand_edges, cand_colour = _visual_features(candidate)
+    scores = []
+    for zoom in (1.0, 1.08, 1.16):
+        ref_edges, ref_colour = _visual_features(_centre_zoom(reference, zoom))
+        edge = float(np.clip(np.dot(ref_edges, cand_edges), 0.0, 1.0))
+        colour = float(np.minimum(ref_colour, cand_colour).sum())
+        scores.append(0.8 * edge + 0.2 * colour)
+    return float(max(scores))
+
+
+def pick_frames(
+    frames: list[Image.Image],
+    k: int,
+    reference: Image.Image | None = None,
+) -> list[int]:
     """Pick k frames: spread across the clip, sharpest within each window.
 
     Spread first, because two stills lifted from adjacent frames are the same
@@ -47,7 +106,22 @@ def pick_frames(frames: list[Image.Image], k: int) -> list[int]:
     out = []
     for lo, hi in zip(edges[:-1], edges[1:]):
         window = usable[lo:hi] or [usable[min(lo, len(usable) - 1)]]
-        out.append(max(window, key=lambda i: sharpness(frames[i])))
+        focus = {i: sharpness(frames[i]) for i in window}
+        lo_focus, hi_focus = min(focus.values()), max(focus.values())
+
+        def score(i: int) -> float:
+            focus_score = (
+                (focus[i] - lo_focus) / (hi_focus - lo_focus)
+                if hi_focus > lo_focus else 1.0
+            )
+            if reference is None:
+                return focus_score
+            consistency = reference_similarity(reference, frames[i])
+            # Product consistency wins a close call; sharpness still prevents
+            # a motion-blurred but structurally similar frame being selected.
+            return 0.75 * consistency + 0.25 * focus_score
+
+        out.append(max(window, key=score))
     return out
 
 

@@ -1,9 +1,8 @@
-"""Build the figure that shows the product surviving generation.
+"""Build the visual comparison between the reference and selected frames.
 
-The claim this supports is the one the whole tool rests on: a seller cannot post
-a picture of a bangle that is not the bangle they will ship. Because
-`strength=0.7` lets the model alter the product, that has to be shown rather
-than asserted.
+A seller cannot post a picture of a bangle that is not the bangle they will
+ship. Because `strength=0.7` lets the model alter the product, every result has
+to be screened and reviewed rather than described as guaranteed.
 
 It is shown rather than scored on purpose. A pixel metric against the plate
 measures the camera move, not the product: the motion prompt pushes the camera
@@ -83,7 +82,7 @@ def build(out_path: str) -> Path:
     H = 64 + len(rows) * (CELL + 34)
     sheet = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(sheet)
-    d.text((22, 22), "The product survives the generation", font=_font(28, bold=True), fill=FG)
+    d.text((22, 22), "Reference and selected frames", font=_font(28, bold=True), fill=FG)
 
     y = 64
     for label, cells in rows:

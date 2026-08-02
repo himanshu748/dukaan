@@ -21,14 +21,16 @@ exactly right.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .backend import Backend, Clip, _fit
 from .config import Config
-from .frames import fit_scene, pick_frames
+from .frames import fit_scene, pick_frames, reference_similarity
 from .layout import compose, contact_strip
 from .spec import FORMATS, FORMATS_BY_NAME, Brief, Format, Style
 
@@ -39,8 +41,14 @@ class PackResult:
     creatives: dict[str, Path] = field(default_factory=dict)
     frame_of: dict[str, int] = field(default_factory=dict)
     clip_frames: list[Path] = field(default_factory=list)
+    #: GIF is retained as a lightweight preview for READMEs and browsers.
     clip: Path | None = None
     audio: Path | None = None
+    #: H.264/AAC is the actual ready-to-post deliverable.
+    video: Path | None = None
+    video_error: str | None = None
+    reference_consistency: dict[str, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     backend: str = ""
     meta: dict = field(default_factory=dict)
 
@@ -49,9 +57,15 @@ class PackResult:
         for name, path in self.creatives.items():
             lines.append(f"  {name:7s} {path}  (frame {self.frame_of.get(name, '?')})")
         if self.clip:
-            lines.append(f"  clip    {self.clip} ({len(self.clip_frames)} frames)")
+            lines.append(f"  preview {self.clip} ({len(self.clip_frames)} frames)")
         if self.audio:
             lines.append(f"  audio   {self.audio}")
+        if self.video:
+            lines.append(f"  video   {self.video} (H.264/AAC, ready to post)")
+        elif self.video_error:
+            lines.append(f"  video   unavailable: {self.video_error}")
+        for warning in self.warnings:
+            lines.append(f"  warning {warning}")
         if self.meta.get("seconds"):
             lines.append(f"  gpu     {self.meta['seconds']}s on {self.backend}")
         return "\n".join(lines)
@@ -81,7 +95,8 @@ def build_pack(
     on_step=None,
 ) -> PackResult:
     style = brief.styled()
-    out_dir = cfg.out_dir / brief.product
+    photo = ImageOps.exif_transpose(photo)
+    out_dir = cfg.out_dir / brief.output_name
     out_dir.mkdir(parents=True, exist_ok=True)
     result = PackResult(brief=brief, backend=backend.name)
 
@@ -101,7 +116,7 @@ def build_pack(
     result.meta = clip.meta
 
     return _finish(cfg, brief, style, contact, out_dir, clip, formats,
-                   backend.name, write_clip, step)
+                   backend.name, write_clip, step, reference=plate)
 
 
 def build_catalogue(
@@ -123,32 +138,96 @@ def build_catalogue(
         if on_step:
             on_step(msg)
 
+    output_names = [brief.output_name for _, brief, _ in jobs]
+    duplicates = sorted({name for name in output_names if output_names.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            "product names resolve to the same output folder: " + ", ".join(duplicates)
+        )
+
     prepared = []
     for photo_path, brief, contact in jobs:
         style = brief.styled()
         step(f"cutout {brief.product}")
-        cut = backend.remove_background(Image.open(photo_path))
+        cut = backend.remove_background(ImageOps.exif_transpose(Image.open(photo_path)))
         plate = make_plate(cut, style, cfg.size)
-        out_dir = cfg.out_dir / brief.product
+        key = brief.output_name
+        out_dir = cfg.out_dir / key
         out_dir.mkdir(parents=True, exist_ok=True)
         plate.save(out_dir / f"{brief.style}_plate.png")
-        prepared.append((brief.product, plate, style, brief, contact, out_dir))
+        prepared.append((key, plate, style, brief, contact, out_dir))
 
     step(f"render {len(prepared)} product(s) in one batch on {backend.name}")
     clips = backend.render_batch([(k, p, st) for k, p, st, _, _, _ in prepared], cfg)
 
     results = []
-    for key, _, style, brief, contact, out_dir in prepared:
+    for key, plate, style, brief, contact, out_dir in prepared:
         clip = clips[key]
         results.append(_finish(cfg, brief, style, contact, out_dir, clip, formats,
-                               backend.name, write_clip, step))
+                               backend.name, write_clip, step, reference=plate))
     return results
 
 
-def _finish(cfg, brief, style, contact, out_dir, clip, formats, backend_name, write_clip, step):
+def write_catalogue_audit(
+    path: Path,
+    photos: list[Path],
+    results: list[PackResult],
+    *,
+    error: str | None = None,
+) -> Path:
+    """Write an honest batch outcome summary, including warnings and failures."""
+    completed = len(results)
+    attempted = len(photos)
+    packs = []
+    for result in results:
+        weakest = min(result.reference_consistency.values(), default=0.0)
+        packs.append(
+            {
+                "product": result.brief.product,
+                "output_name": result.brief.output_name,
+                "status": "review" if result.warnings else "completed",
+                "minimum_reference_consistency": round(weakest, 4),
+                "warnings": result.warnings,
+                "video": str(result.video) if result.video else None,
+                "video_error": result.video_error,
+            }
+        )
+
+    payload = {
+        "protocol": "dukaan-catalogue-audit-v1",
+        "inputs": [photo.name for photo in photos],
+        "attempted": attempted,
+        "completed": completed,
+        "failed": max(attempted - completed, 0),
+        "review_required": sum(pack["status"] == "review" for pack in packs),
+        "error": error,
+        "packs": packs,
+        "note": (
+            "Reference consistency is a screening heuristic, not proof of product "
+            "identity. Inspect every product before publishing."
+        ),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def _finish(
+    cfg,
+    brief,
+    style,
+    contact,
+    out_dir,
+    clip,
+    formats,
+    backend_name,
+    write_clip,
+    step,
+    reference,
+):
     """Everything after the GPU: pick stills, compose type, write the pack."""
     result = PackResult(brief=brief, backend=backend_name, meta=clip.meta)
-    picks = pick_frames(clip.frames, len(formats))
+    picks = pick_frames(clip.frames, len(formats), reference=reference)
     for fmt, idx in zip(formats, picks):
         step(f"compose {brief.product} {fmt.name}")
         canvas = compose(fit_scene(clip.frames[idx], fmt.size), brief, fmt, style)
@@ -157,6 +236,13 @@ def _finish(cfg, brief, style, contact, out_dir, clip, formats, backend_name, wr
         canvas.save(path)
         result.creatives[fmt.name] = path
         result.frame_of[fmt.name] = idx
+        consistency = round(reference_similarity(reference, clip.frames[idx]), 4)
+        result.reference_consistency[fmt.name] = consistency
+        if consistency < cfg.consistency_warn:
+            result.warnings.append(
+                f"review {fmt.name}: reference consistency {consistency:.2f} "
+                f"is below {cfg.consistency_warn:.2f}"
+            )
 
     if write_clip:
         frame_dir = out_dir / f"{brief.style}_clip_frames"
@@ -169,6 +255,17 @@ def _finish(cfg, brief, style, contact, out_dir, clip, formats, backend_name, wr
         if clip.audio:
             result.audio = out_dir / f"{brief.style}_clip.wav"
             result.audio.write_bytes(clip.audio)
+        try:
+            result.video = _write_mp4(
+                frame_dir,
+                out_dir / f"{brief.style}_clip.mp4",
+                cfg.fps,
+                result.audio,
+            )
+        except RuntimeError as exc:
+            # The still pack is still useful, but the missing ready-to-post
+            # video is made explicit in both the terminal and the manifest.
+            result.video_error = str(exc)
 
     (out_dir / f"{brief.style}_manifest.json").write_text(
         json.dumps(
@@ -185,8 +282,13 @@ def _finish(cfg, brief, style, contact, out_dir, clip, formats, backend_name, wr
                 "run": clip.meta,
                 "creatives": {k: str(v) for k, v in result.creatives.items()},
                 "still_from_frame": result.frame_of,
-                "clip": str(result.clip) if result.clip else None,
+                "reference_consistency": result.reference_consistency,
+                "consistency_warning_below": cfg.consistency_warn,
+                "warnings": result.warnings,
+                "preview_gif": str(result.clip) if result.clip else None,
                 "audio": str(result.audio) if result.audio else None,
+                "video": str(result.video) if result.video else None,
+                "video_error": result.video_error,
             },
             indent=2,
         )
@@ -271,4 +373,44 @@ def _write_gif(frames: list[Image.Image], path: Path, fps: int) -> Path:
     head, *rest = [f.convert("P", palette=Image.ADAPTIVE) for f in frames]
     head.save(path, save_all=True, append_images=rest,
               duration=max(int(1000 / max(fps, 1)), 20), loop=0, optimize=True)
+    return path
+
+
+def _write_mp4(frame_dir: Path, path: Path, fps: int, audio: Path | None = None) -> Path:
+    """Mux generated frames and audio into a social-platform-ready MP4."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            "ffmpeg is not installed; install it to create the H.264/AAC MP4"
+        )
+
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-loglevel",
+        "error",
+        "-framerate",
+        str(max(fps, 1)),
+        "-i",
+        str(frame_dir / "%03d.png"),
+    ]
+    if audio and audio.exists():
+        cmd += ["-i", str(audio), "-c:a", "aac", "-b:a", "128k", "-shortest"]
+    cmd += [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if proc.returncode or not path.exists() or path.stat().st_size == 0:
+        detail = (proc.stderr or proc.stdout or "unknown ffmpeg failure").strip()
+        raise RuntimeError(f"MP4 encoding failed: {detail[-400:]}")
     return path
